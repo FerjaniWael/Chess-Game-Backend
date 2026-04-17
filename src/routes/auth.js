@@ -2,6 +2,12 @@ const express = require('express');
 const { passport, authEnabled } = require('../config/passport');
 
 const authRouter = express.Router();
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const DEFAULT_FRONTEND_URL =
+  (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)[0] || 'http://localhost:3000';
 
 function buildAuthPayload(user) {
   if (!user) {
@@ -55,10 +61,10 @@ authRouter.get('/google/callback', (req, res, next) => {
   }
 
   return passport.authenticate('google', {
-    failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3000'}?auth=failed`,
+    failureRedirect: `${DEFAULT_FRONTEND_URL}?auth=failed`,
     session: true,
   })(req, res, () => {
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}?auth=success`);
+    res.redirect(`${DEFAULT_FRONTEND_URL}?auth=success`);
   });
 });
 
@@ -72,7 +78,11 @@ authRouter.post('/logout', (req, res) => {
       return res.status(500).json({ message: 'Logout failed.' });
     }
     req.session.destroy(() => {
-      res.clearCookie('chess.sid');
+      res.clearCookie('chess.sid', {
+        httpOnly: true,
+        sameSite: IS_PRODUCTION ? 'none' : 'lax',
+        secure: IS_PRODUCTION,
+      });
       res.json({ success: true });
     });
   });

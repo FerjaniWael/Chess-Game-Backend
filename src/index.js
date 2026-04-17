@@ -19,20 +19,39 @@ const { registerOnlineSocket } = require('./socket/onlineSocket');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const FRONTEND_URLS = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 const SESSION_SECRET = process.env.SESSION_SECRET || 'change-this-session-secret';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const MySQLStore = MySQLStoreFactory(session);
+
+function corsOriginValidator(origin, callback) {
+  if (!origin) {
+    callback(null, true);
+    return;
+  }
+
+  if (FRONTEND_URLS.includes(origin)) {
+    callback(null, true);
+    return;
+  }
+
+  callback(new Error('CORS origin is not allowed'));
+}
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: FRONTEND_URL,
+    origin: corsOriginValidator,
     credentials: true,
   },
 });
 
 app.use(
   cors({
-    origin: FRONTEND_URL,
+    origin: corsOriginValidator,
     credentials: true,
   }),
 );
@@ -52,6 +71,8 @@ async function startServer() {
   try {
     await initDatabase();
 
+    app.set('trust proxy', 1);
+
     const sessionStore = new MySQLStore(
       {
         host: dbConfig.host,
@@ -59,6 +80,7 @@ async function startServer() {
         user: dbConfig.user,
         password: dbConfig.password,
         database: dbConfig.database,
+        ssl: dbConfig.ssl,
         createDatabaseTable: true,
         schema: {
           tableName: 'sessions',
@@ -77,11 +99,12 @@ async function startServer() {
       store: sessionStore,
       resave: false,
       saveUninitialized: false,
+      proxy: IS_PRODUCTION,
       cookie: {
         maxAge: 7 * 24 * 60 * 60 * 1000,
         httpOnly: true,
-        sameSite: 'lax',
-        secure: false,
+        sameSite: IS_PRODUCTION ? 'none' : 'lax',
+        secure: IS_PRODUCTION,
       },
     });
 
@@ -106,7 +129,7 @@ async function startServer() {
     app.use('/api/online-games', ensureAuthenticated, onlineGamesRouter);
 
     server.listen(PORT, () => {
-      console.log(`Chess backend running on http://localhost:${PORT}`);
+      console.log(`Chess backend running on port ${PORT}`);
       console.log(
         `MySQL connected: ${dbConfig.user}@${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`,
       );
